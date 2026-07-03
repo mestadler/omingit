@@ -1,0 +1,9 @@
+# ai-memory data (per-project bind mount)
+data/
+
+# gg binary (build artifact)
+/gg
+
+# Runtime/log directories
+logs/
+status/
