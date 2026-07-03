@@ -4,6 +4,6 @@ data/
 # gg binary (build artifact)
 /gg
 
-# Runtime/log directories
-logs/
-status/
+# runtime artifacts
+/logs/
+/status/

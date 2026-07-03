@@ -10,11 +10,20 @@ import (
 	"github.com/mestadler/omingit/internal/host"
 )
 
+var version = "dev"
+
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
+	if len(os.Args) > 1 {
+		if os.Args[1] == "--version" || os.Args[1] == "-v" {
+			fmt.Println(version)
+			return 0
+		}
+	}
+
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: gg <command> [args...]\n\n")
 		fmt.Fprintf(os.Stderr, "gg routes commands to git, gh, or tea based on the remote's host.\n")
