@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/mestadler/omingit/internal/classify"
+	"github.com/mestadler/omingit/internal/gitea"
 	"github.com/mestadler/omingit/internal/host"
 )
 
@@ -42,6 +43,13 @@ func run() int {
 			fmt.Fprintf(os.Stderr, "gg: unknown host. Set GG_HOST=github or GG_HOST=gitea.\n")
 			return 1
 		}
+
+		// Gitea-hosted repos: route workflow/run through local SDK.
+		// All other commands continue to exec passthrough.
+		if h == host.Gitea && (cmd == "workflow" || cmd == "run") {
+			return runGiteaSDK(cmd, args)
+		}
+
 		if err := lookPath(cli); err != nil {
 			fmt.Fprintf(os.Stderr, "gg: %s not found in PATH (required for %s operations)\n", cli, h)
 			fmt.Fprintf(os.Stderr, "  Install: https://%s.com/cli\n", h)
@@ -61,6 +69,59 @@ func detectOrigin() host.Host {
 		return host.Detect("")
 	}
 	return host.Detect(string(out))
+}
+
+// runGiteaSDK handles workflow and run subcommands via the local Gitea SDK
+// instead of exec passthrough to tea.
+func runGiteaSDK(cmd string, args []string) int {
+	client, err := gitea.NewClientFromOrigin()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "gg: %v\n", err)
+		return 1
+	}
+
+	sub := ""
+	if len(args) > 1 {
+		sub = args[1]
+	}
+
+	switch cmd {
+	case "workflow":
+		switch sub {
+		case "list":
+			workflows, err := client.ListWorkflows()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "gg: listing workflows: %v\n", err)
+				return 1
+			}
+			for _, w := range workflows {
+				fmt.Printf("%s  (state: %s)\n", w.Name, w.State)
+			}
+			return 0
+		default:
+			fmt.Fprintf(os.Stderr, "gg workflow: unknown subcommand %q\n", sub)
+			return 1
+		}
+	case "run":
+		switch sub {
+		case "list":
+			runs, err := client.ListRuns("")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "gg: listing runs: %v\n", err)
+				return 1
+			}
+			for _, r := range runs {
+				fmt.Printf("%-8d %-20s %-10s %s\n", r.ID, r.DisplayTitle, r.Status, r.Conclusion)
+			}
+			return 0
+		default:
+			fmt.Fprintf(os.Stderr, "gg run: unknown subcommand %q\n", sub)
+			return 1
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "gg: internal error: runGiteaSDK called with unsupported command %q\n", cmd)
+		return 1
+	}
 }
 
 // runCmd executes the given command with args, connecting stdio directly.
