@@ -56,6 +56,10 @@ func run() int {
 	cmd := os.Args[cmdIdx]
 	args := os.Args[cmdIdx:] // pass through remaining args including the subcommand
 
+	if cmd == "completion" {
+		return completionCmd(args[1:])
+	}
+
 	// Route platform-specific commands to gh or tea.
 	if classify.IsPlatform(cmd) {
 		h := detectOrigin(repoPath)
