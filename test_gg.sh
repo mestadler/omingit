@@ -176,6 +176,59 @@ else
 	echo "#       got: $(echo "$output" | head -c 300)"
 fi
 
+# --- Gitea SDK workflow/run commands ---
+echo "# Gitea SDK workflow/run commands"
+
+GITEASDKREPO="$(mktemp -d)"
+make_gitea_repo "$GITEASDKREPO"
+
+# gg workflow list: routed to SDK; fails because there is no real server.
+COUNT=$((COUNT+1))
+tmpout="$TMPDIR/gg_wf_list"
+if (cd "$GITEASDKREPO" && env GG_HOST=gitea GITEA_TOKEN=fake-token PATH="$MOCKBIN:$PATH" "$BIN" workflow list) >"$tmpout" 2>&1; then
+	not_ok "gg_workflow_list_gitea (SDK dispatch)"
+	echo "#       expected non-zero exit but got 0"
+else
+	output=$(cat "$tmpout")
+	if echo "$output" | grep -qi "not a git command"; then
+		not_ok "gg_workflow_list_gitea (SDK dispatch)"
+		echo "#       misrouted to git (saw 'not a git command')"
+	elif echo "$output" | grep -qi "gg:"; then
+		ok "gg_workflow_list_gitea (SDK dispatch)"
+	else
+		not_ok "gg_workflow_list_gitea (SDK dispatch)"
+		echo "#       unexpected output (no gg: prefix)"
+		echo "#       got: $(echo "$output" | head -c 300)"
+	fi
+fi
+
+# gg run list: routed to SDK; fails because there is no real server.
+COUNT=$((COUNT+1))
+tmpout="$TMPDIR/gg_run_list"
+if (cd "$GITEASDKREPO" && env GG_HOST=gitea GITEA_TOKEN=fake-token PATH="$MOCKBIN:$PATH" "$BIN" run list) >"$tmpout" 2>&1; then
+	not_ok "gg_run_list_gitea (SDK dispatch)"
+	echo "#       expected non-zero exit but got 0"
+else
+	output=$(cat "$tmpout")
+	if echo "$output" | grep -qi "tea called"; then
+		not_ok "gg_run_list_gitea (SDK dispatch)"
+		echo "#       misrouted to tea (saw 'tea called')"
+	elif echo "$output" | grep -qi "usage: git"; then
+		not_ok "gg_run_list_gitea (SDK dispatch)"
+		echo "#       misrouted to git (saw 'usage: git')"
+	elif echo "$output" | grep -qi "gg:"; then
+		ok "gg_run_list_gitea (SDK dispatch)"
+	else
+		not_ok "gg_run_list_gitea (SDK dispatch)"
+		echo "#       unexpected output"
+		echo "#       got: $(echo "$output" | head -c 300)"
+	fi
+fi
+
+# gg pr list: should still route to tea, not the SDK.
+assert_output_env "gg_pr_list_gitea (tea passthrough)" \
+	"tea called with: pr list" "$GITEASDKREPO" "GG_HOST=gitea" pr list
+
 # --- results ---
 echo ""
 echo "# $COUNT tests, $PASS pass, $FAIL fail"
