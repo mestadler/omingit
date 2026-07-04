@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/mestadler/omingit/internal/classify"
 	"github.com/mestadler/omingit/internal/gitea"
@@ -25,19 +27,38 @@ func run() int {
 		}
 	}
 
-	if len(os.Args) < 2 {
+	// Scan for -C <path> before the first non-flag argument.
+	var repoPath string
+	cmdIdx := 1
+	for cmdIdx < len(os.Args) {
+		if os.Args[cmdIdx] == "-C" {
+			if cmdIdx+1 >= len(os.Args) {
+				fmt.Fprintf(os.Stderr, "gg: -C requires a path argument\n")
+				return 1
+			}
+			repoPath = os.Args[cmdIdx+1]
+			cmdIdx += 2
+			continue
+		}
+		if !strings.HasPrefix(os.Args[cmdIdx], "-") {
+			break
+		}
+		cmdIdx++
+	}
+
+	if cmdIdx >= len(os.Args) {
 		fmt.Fprintf(os.Stderr, "Usage: gg <command> [args...]\n\n")
 		fmt.Fprintf(os.Stderr, "gg routes commands to git, gh, or tea based on the remote's host.\n")
 		fmt.Fprintf(os.Stderr, "See SKILL.md for full documentation.\n")
 		return 1
 	}
 
-	cmd := os.Args[1]
-	args := os.Args[1:] // pass through all args including the subcommand
+	cmd := os.Args[cmdIdx]
+	args := os.Args[cmdIdx:] // pass through remaining args including the subcommand
 
 	// Route platform-specific commands to gh or tea.
 	if classify.IsPlatform(cmd) {
-		h := detectOrigin()
+		h := detectOrigin(repoPath)
 		cli := h.CLI()
 		if cli == "" {
 			fmt.Fprintf(os.Stderr, "gg: unknown host. Set GG_HOST=github or GG_HOST=gitea.\n")
@@ -55,16 +76,78 @@ func run() int {
 			fmt.Fprintf(os.Stderr, "  Install: https://%s.com/cli\n", h)
 			return 1
 		}
+		if repoPath != "" {
+			return runCmd(cli, append([]string{"-C", repoPath}, args...)...)
+		}
 		return runCmd(cli, args...)
 	}
 
 	// Default: pass through to git.
-	return runCmd("git", args...)
+	// If git fails with "not a git command" and a platform CLI is
+	// available, retry with gh or tea.
+	return runGitWithFallback(repoPath, args)
+}
+
+// runGitWithFallback tries git first. If git exits 1 with
+// "is not a git command" and a platform CLI (gh/tea) is
+// detected, it retries with that CLI.
+func runGitWithFallback(repoPath string, args []string) int {
+	gitArgs := args
+	if repoPath != "" {
+		gitArgs = append([]string{"-C", repoPath}, args...)
+	}
+
+	var stderr bytes.Buffer
+	cmd := exec.Command("git", gitArgs...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err == nil {
+		return 0
+	}
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		os.Stderr.Write(stderr.Bytes())
+		return 1
+	}
+
+	if !strings.Contains(stderr.String(), "is not a git command") {
+		os.Stderr.Write(stderr.Bytes())
+		return 1
+	}
+
+	// Git doesn't know this command. Try the platform CLI.
+	h := detectOrigin(repoPath)
+	cli := h.CLI()
+	if cli == "" {
+		os.Stderr.Write(stderr.Bytes())
+		return 1
+	}
+
+	if err := lookPath(cli); err != nil {
+		os.Stderr.Write(stderr.Bytes())
+		return 1
+	}
+
+	if repoPath != "" {
+		return runCmd(cli, append([]string{"-C", repoPath}, args...)...)
+	}
+	return runCmd(cli, args...)
 }
 
 // detectOrigin reads the origin remote URL to determine the host.
-func detectOrigin() host.Host {
-	out, err := exec.Command("git", "remote", "get-url", "origin").Output()
+// When repoPath is non-empty, it runs git in that directory via -C.
+func detectOrigin(repoPath string) host.Host {
+	var out []byte
+	var err error
+	if repoPath != "" {
+		out, err = exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	} else {
+		out, err = exec.Command("git", "remote", "get-url", "origin").Output()
+	}
 	if err != nil {
 		return host.Detect("")
 	}

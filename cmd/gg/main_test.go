@@ -46,7 +46,7 @@ func TestDetectOrigin_ReturnsHost(t *testing.T) {
 	// detectOrigin runs a real git command. This test verifies the
 	// function compiles, does not panic, and returns a host.Host.
 	// Full behaviour is tested in the integration suite (test_gg.sh).
-	h := detectOrigin()
+	h := detectOrigin("")
 	_ = h // uses the host package type
 }
 
